@@ -34,6 +34,24 @@ clean_df = json_df.withColumn("artist", trim(lower(col("artist")))) \
   .withColumn("event_time", to_timestamp(col("datetime"), "dd MMM yyyy, HH:mm")) \
   .dropna(subset=["artist", "track", "event_time"])
 
+def merge_to_delta(microBatchDF, batchId):
+    microBatchDF.createOrReplaceTempView("updates")
+
+    microBatchDF.sparkSession.sql("""
+        MERGE INTO delta.`/mnt/delta/kpis/top_artists` AS target
+        USING updates AS source
+        ON target.artist = source.artist
+        WHEN MATCHED AND source.plays_last_hour = 0 THEN
+            DELETE
+        WHEN MATCHED THEN
+            UPDATE SET
+                target.plays_last_hour = source.plays_last_hour,
+                target.last_play_time = source.last_play_time
+        WHEN NOT MATCHED THEN
+            INSERT (artist, plays_last_hour, last_play_time)
+            VALUES (source.artist, source.plays_last_hour, source.last_play_time)
+    """)
+
 # 1. Top 10 Artists in last 1 hour (sliding window)
 df_with_ts = clean_df.withColumn(
     "event_time", from_unixtime("timestamp").cast("timestamp")
@@ -59,10 +77,12 @@ unique_tracks = clean_df.agg(countDistinct("track").alias("unique_tracks"))
 active_users = clean_df.groupBy("user").count().orderBy(col("count").desc())
 
 # Write KPI results to Delta tables
-query1 = top_artists.writeStream.outputMode("complete").format("delta") \
-  .option("checkpointLocation", "/mnt/delta/checkpoints/top_artists") \
-  .option("path", "/mnt/delta/kpis/top_artists") \
-  .start()
+query1 = top_artists.writeStream \
+    .foreachBatch(merge_to_delta) \
+    .outputMode("update") \
+    .option("checkpointLocation", "/mnt/delta/checkpoints/top_artists") \
+    .trigger(processingTime="5 minutes") \
+    .start()
 
 query2 = unique_tracks.writeStream.outputMode("complete").format("delta") \
   .option("checkpointLocation", "/mnt/delta/checkpoints/unique_tracks") \
