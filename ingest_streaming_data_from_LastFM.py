@@ -3,7 +3,8 @@ import json
 import time
 from azure.eventhub import EventHubProducerClient, EventData
 
-API_KEY = 'b12d34f6a89ab1234cd56ef78a90bcde'
+#these are dummy values
+API_KEY = 'b12d34f6a89ab1234cd56ef78a90bcde' 
 USERNAME = 'nideesh123'
 EVENT_HUB_CONN_STR = (
     'Endpoint=sb://streamingdatanid.servicebus.windows.net/;'
